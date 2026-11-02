@@ -10,86 +10,82 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.Locale
 import java.util.zip.InflaterInputStream
 
-/**
- * Implements the ALi / G-MScreen binary-framed TCP protocol (default port 20000)
- * used by ALi 2661 (Senator Captain Q2 4K CA) and ALi 35xx/36xx/38xx receivers.
- *
- * Packet Framing Format:
- *   "Start" + 7-digit zero-padded byte length + "End" + UTF-8 JSON/XML payload
- *   Example: Start0000016End{"request":"15"}
- *
- * Response Format:
- *   1. Optional 16-byte "GCDH..." header acknowledgement
- *   2. Zlib-compressed (0x78 0x9C) or plain UTF-8 JSON/XML response
- */
-class GmScreenFramedTcpClient(
-    private val allowExternalLan: Boolean = false
-) {
+class GmScreenFramedTcpClient(private val allowExternalLan: Boolean = false) {
     private val socketMutex = Mutex()
     private var socket: Socket? = null
-    private var currentHost: String? = null
-    private var currentPort: Int = DEFAULT_GMSCREEN_PORT
 
     companion object {
         const val DEFAULT_GMSCREEN_PORT = 20000
         const val BROADCAST_MAGIC_CODE = "39WwijOog54a"
         const val ACK_HEADER_PREFIX = "GCDH"
+        const val HANDSHAKE_GREETING_SIZE = 108
+        private const val MAX_RESPONSE_SIZE = 1_048_576
 
         fun framePayload(payload: String): ByteArray {
-            val payloadBytes = payload.toByteArray(Charsets.UTF_8)
-            val lengthFormatted = String.format(Locale.US, "%07d", payloadBytes.size)
-            val header = "Start${lengthFormatted}End".toByteArray(Charsets.UTF_8)
-            return header + payloadBytes
+            val bytes = payload.toByteArray(Charsets.UTF_8)
+            val len = String.format(Locale.US, "%07d", bytes.size)
+            return "Start${len}End".toByteArray(Charsets.US_ASCII) + bytes
         }
 
-        fun decodeResponseBytes(rawBytes: ByteArray): String {
-            if (rawBytes.isEmpty()) return ""
-            // Strip leading 16-byte GCDH header if attached in the same TCP read buffer
-            val payloadBytes = if (rawBytes.size > 16 &&
-                String(rawBytes, 0, 4, Charsets.US_ASCII) == ACK_HEADER_PREFIX
-            ) {
-                rawBytes.copyOfRange(16, rawBytes.size)
-            } else {
-                rawBytes
+        internal fun readExact(input: InputStream, length: Int): ByteArray {
+            require(length >= 0)
+            val result = ByteArray(length)
+            var offset = 0
+            while (offset < length) {
+                val n = input.read(result, offset, length - offset)
+                if (n < 0) throw EOFException("Expected $length bytes; received $offset")
+                if (n == 0) {
+                    val one = input.read()
+                    if (one < 0) throw EOFException("Expected $length bytes; received $offset")
+                    result[offset++] = one.toByte()
+                } else offset += n
             }
-
-            if (payloadBytes.size >= 2 &&
-                payloadBytes[0] == 0x78.toByte() &&
-                (payloadBytes[1] == 0x9C.toByte() || payloadBytes[1] == 0x01.toByte() || payloadBytes[1] == 0xDA.toByte())
-            ) {
-                return decompressZlib(payloadBytes)
-            }
-            // Also check if a Start00000XXEnd wrapper is present on uncompressed response
-            val rawString = String(payloadBytes, Charsets.UTF_8)
-            if (rawString.startsWith("Start") && rawString.length > 15 && rawString.substring(12, 15) == "End") {
-                return rawString.substring(15)
-            }
-            return rawString
+            return result
         }
 
-        private fun decompressZlib(compressed: ByteArray): String {
-            ByteArrayInputStream(compressed).use { bais ->
-                InflaterInputStream(bais).use { inflater ->
-                    ByteArrayOutputStream().use { baos ->
-                        val buffer = ByteArray(4096)
-                        var read: Int
-                        while (inflater.read(buffer).also { read = it } != -1) {
-                            baos.write(buffer, 0, read)
-                        }
-                        return baos.toString(Charsets.UTF_8.name())
+        internal fun gcdhBodyLength(header: ByteArray): Int {
+            require(header.size == 16)
+            require(String(header, 0, 4, Charsets.US_ASCII) == ACK_HEADER_PREFIX)
+            return (header[4].toInt() and 0xff) or
+                ((header[5].toInt() and 0xff) shl 8)
+        }
+
+        fun decodeResponseBytes(bytes: ByteArray): String {
+            if (bytes.isEmpty()) return ""
+            val decoded = if (bytes.size >= 2 &&
+                bytes[0] == 0x78.toByte() &&
+                (bytes[1] == 0x9C.toByte() || bytes[1] == 0x01.toByte() ||
+                    bytes[1] == 0xDA.toByte())
+            ) decompressZlib(bytes) else String(bytes, Charsets.UTF_8)
+
+            return if (decoded.startsWith("Start") && decoded.length >= 15 &&
+                decoded.substring(12, 15) == "End"
+            ) decoded.substring(15) else decoded
+        }
+
+        private fun decompressZlib(bytes: ByteArray): String {
+            InflaterInputStream(ByteArrayInputStream(bytes)).use { inflater ->
+                ByteArrayOutputStream().use { out ->
+                    val buffer = ByteArray(4096)
+                    while (true) {
+                        val n = inflater.read(buffer)
+                        if (n < 0) break
+                        out.write(buffer, 0, n)
                     }
+                    return out.toString(Charsets.UTF_8.name())
                 }
             }
         }
     }
 
-    suspend fun connect(host: String, port: Int = DEFAULT_GMSCREEN_PORT, timeoutMs: Int = 3500): AppResult<Unit> =
+    suspend fun connect(host: String, port: Int = DEFAULT_GMSCREEN_PORT, timeoutMs: Int = 5000): AppResult<Unit> =
         withContext(Dispatchers.IO) {
             socketMutex.withLock {
                 if (!LocalNetworkGuard.verifyTargetAllowed(host, allowExternalLan)) {
@@ -100,17 +96,20 @@ class GmScreenFramedTcpClient(
                 }
                 try {
                     closeInternal()
-                    val newSocket = Socket()
-                    newSocket.soTimeout = timeoutMs
-                    newSocket.connect(InetSocketAddress(host, port), timeoutMs)
-                    socket = newSocket
-                    currentHost = host
-                    currentPort = port
-                    StructuredLogger.info("GmScreenTcp", "Connected to STB TCP port", mapOf("host" to host, "port" to port))
+                    val s = Socket()
+                    s.soTimeout = timeoutMs
+                    s.tcpNoDelay = true
+                    s.connect(InetSocketAddress(host, port), timeoutMs)
+                    socket = s
+                    StructuredLogger.info("GmScreenTcp", "Connected to STB TCP port",
+                        mapOf("host" to host, "port" to port))
                     AppResult.Success(Unit)
                 } catch (e: Exception) {
-                    StructuredLogger.warn("GmScreenTcp", "TCP connection failed", mapOf("host" to host, "port" to port, "reason" to e.message))
-                    AppResult.Error(ErrorCode.PORT_CLOSED, "تعذر فتح منفذ التحكم ($port) على الجهاز $host: ${e.message}", e)
+                    closeInternal()
+                    StructuredLogger.warn("GmScreenTcp", "TCP connection failed",
+                        mapOf("host" to host, "port" to port, "reason" to e.message))
+                    AppResult.Error(ErrorCode.PORT_CLOSED,
+                        "تعذر فتح منفذ التحكم ($port) على الجهاز $host: ${e.message}", e)
                 }
             }
         }
@@ -118,64 +117,58 @@ class GmScreenFramedTcpClient(
     suspend fun sendRequest(payload: String, expectResponse: Boolean = true): AppResult<String> =
         withContext(Dispatchers.IO) {
             socketMutex.withLock {
-                val activeSocket = socket
-                if (activeSocket == null || activeSocket.isClosed || !activeSocket.isConnected) {
+                val s = socket
+                if (s == null || s.isClosed || !s.isConnected) {
                     return@withLock AppResult.Error(ErrorCode.NETWORK_UNREACHABLE, "الجهاز غير متصل حالياً.")
                 }
                 try {
-                    val framed = framePayload(payload)
-                    val out = activeSocket.getOutputStream()
-                    out.write(framed)
-                    out.flush()
+                    s.getOutputStream().apply { write(framePayload(payload)); flush() }
+                    if (!expectResponse) return@withLock AppResult.Success("")
+                    val input = s.getInputStream()
 
-                    if (!expectResponse) {
-                        return@withLock AppResult.Success("")
+                    // request 998 returns a raw 108-byte greeting, not a JSON/GCDH packet.
+                    if (payload.contains("request=\"998\"") || payload.contains("request='998'")) {
+                        val greeting = readExact(input, HANDSHAKE_GREETING_SIZE)
+                        if (greeting[0] != '['.code.toByte() || greeting[1] != '['.code.toByte()) {
+                            throw IllegalStateException("Invalid G-MScreen greeting prefix")
+                        }
+                        return@withLock AppResult.Success(String(greeting, Charsets.UTF_8))
                     }
 
-                    val input = activeSocket.getInputStream()
-                    val responseBytes = readResponsePacket(input)
-                    if (responseBytes.isEmpty()) {
-                        return@withLock AppResult.Error(ErrorCode.INVALID_RESPONSE_PAYLOAD, "لم يرسل الرسيفر أي استجابة.")
-                    }
-                    val decoded = decodeResponseBytes(responseBytes)
-                    AppResult.Success(decoded)
+                    val packet = readResponsePacket(input)
+                    if (packet.isEmpty()) return@withLock AppResult.Error(
+                        ErrorCode.INVALID_RESPONSE_PAYLOAD, "أرسل الرسيفر إقرار GCDH فارغاً دون بيانات.")
+                    AppResult.Success(decodeResponseBytes(packet))
                 } catch (e: Exception) {
                     StructuredLogger.error("GmScreenTcp", "Command execution error", e)
-                    AppResult.Error(ErrorCode.CONNECTION_TIMEOUT, "انتهت مهلة انتظار استجابة الرسيفر: ${e.message}", e)
+                    AppResult.Error(ErrorCode.CONNECTION_TIMEOUT,
+                        "تعذر استلام استجابة كاملة من الرسيفر: ${e.message}", e)
                 }
             }
         }
 
     private fun readResponsePacket(input: InputStream): ByteArray {
-        val firstChunk = ByteArray(8192)
-        val firstRead = input.read(firstChunk)
-        if (firstRead <= 0) return ByteArray(0)
-
-        val baos = ByteArrayOutputStream()
-        // If the first read is purely the 16-byte GCDH acknowledgement header, read the next frame
-        if (firstRead == 16 && String(firstChunk, 0, 4, Charsets.US_ASCII) == ACK_HEADER_PREFIX) {
-            val secondRead = input.read(firstChunk)
-            if (secondRead > 0) {
-                baos.write(firstChunk, 0, secondRead)
-            }
-        } else {
-            baos.write(firstChunk, 0, firstRead)
+        val prefix = readExact(input, 4)
+        if (String(prefix, Charsets.US_ASCII) == ACK_HEADER_PREFIX) {
+            val header = prefix + readExact(input, 12)
+            val length = gcdhBodyLength(header)
+            if (length == 0) return ByteArray(0) // transport ACK only
+            require(length <= MAX_RESPONSE_SIZE) { "GCDH body too large: $length" }
+            return readExact(input, length)
         }
-        return baos.toByteArray()
+        // Fallback for non-GCDH firmware responses.
+        val out = ByteArrayOutputStream()
+        out.write(prefix)
+        val pending = input.available()
+        if (pending > 0) out.write(readExact(input, pending))
+        return out.toByteArray()
     }
 
     suspend fun disconnect() = withContext(Dispatchers.IO) {
-        socketMutex.withLock {
-            closeInternal()
-        }
+        socketMutex.withLock { closeInternal() }
     }
 
     private fun closeInternal() {
-        try {
-            socket?.close()
-        } catch (_: Exception) {
-        } finally {
-            socket = null
-        }
+        try { socket?.close() } catch (_: Exception) { } finally { socket = null }
     }
 }
