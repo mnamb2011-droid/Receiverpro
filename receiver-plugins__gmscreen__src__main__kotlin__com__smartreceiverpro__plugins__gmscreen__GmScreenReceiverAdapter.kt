@@ -59,7 +59,17 @@ open class GmScreenReceiverAdapter(
 
         // Step 1: Send XML request="998" handshake
         val xmlHandshake = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><Command request=\"998\" />"
-        tcpClient.sendRequest(xmlHandshake, expectResponse = false)
+        
+val greeting = tcpClient.sendRequest(xmlHandshake, expectResponse = true)
+if (greeting !is AppResult.Success || !greeting.data.startsWith("[[")) {
+    tcpClient.disconnect()
+    return AppResult.Error(
+        ErrorCode.HANDSHAKE_REJECTED,
+        "رفض الرسيفر مصافحة G-MScreen أو لم يرسل رسالة الترحيب المتوقعة."
+    )
+}
+
+اترك طلب request 15 بعد هذا المقطع كما هو.
 
         // Step 2: Query real device info via request="15"
         val infoResponse = tcpClient.sendRequest("{\"request\":\"15\"}", expectResponse = true)
