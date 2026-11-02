@@ -480,4 +480,3 @@ class MainActivity : ComponentActivity() {
         livePlayerController.release()
     }
 }
-                        }
