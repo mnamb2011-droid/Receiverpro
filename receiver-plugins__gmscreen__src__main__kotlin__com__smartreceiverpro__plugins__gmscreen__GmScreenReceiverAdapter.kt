@@ -69,8 +69,6 @@ if (greeting !is AppResult.Success || !greeting.data.startsWith("[[")) {
     )
 }
 
-اترك طلب request 15 بعد هذا المقطع كما هو.
-
         // Step 2: Query real device info via request="15"
         val infoResponse = tcpClient.sendRequest("{\"request\":\"15\"}", expectResponse = true)
         if (infoResponse !is AppResult.Success || infoResponse.data.isBlank()) {
