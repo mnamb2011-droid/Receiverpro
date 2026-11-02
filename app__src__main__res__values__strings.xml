@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SMART RECEIVER PRO</string>
+    <string name="dashboard_title">لوحة التحكم الذكية</string>
+    <string name="status_connected">متصل فعلياً</string>
+    <string name="status_disconnected">غير متصل</string>
+    <string name="scan_devices">بحث عن الأجهزة</string>
+    <string name="add_manual_ip">إضافة جهاز يدوياً</string>
+</resources>

@@ -1,0 +1,4 @@
+-keepattributes *Annotation*,InnerClasses,Signature
+-keep class com.smartreceiverpro.engine.api.** { *; }
+-keep class com.smartreceiverpro.core.database.** { *; }
+-dontwarn kotlinx.serialization.**

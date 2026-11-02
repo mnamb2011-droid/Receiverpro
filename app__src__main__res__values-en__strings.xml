@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SMART RECEIVER PRO</string>
+    <string name="dashboard_title">Smart Receiver Dashboard</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="scan_devices">Scan LAN Devices</string>
+    <string name="add_manual_ip">Add IP Manually</string>
+</resources>

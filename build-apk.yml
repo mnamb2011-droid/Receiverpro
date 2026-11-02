@@ -1,0 +1,124 @@
+name: Reorganize Flat Files & Build APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  organize-and-build-apk:
+    name: Organize Folders & Build Android APK/AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Auto-Organize Flat Uploaded Files into Android Studio Folders
+        run: |
+          python3 - << 'PYEOF'
+          import os, shutil, tarfile
+          from pathlib import Path
+
+          root = Path(".")
+          # A. If SmartReceiverPro_Bundle.tar.gz was uploaded, extract it first
+          bundle = root / "SmartReceiverPro_Bundle.tar.gz"
+          if bundle.exists():
+              print("Extracting SmartReceiverPro_Bundle.tar.gz...")
+              with tarfile.open(bundle, "r:gz") as tar:
+                  tar.extractall(path=root)
+
+          # B. Reconstruct any flat files named with "__" separator (e.g. app__build.gradle.kts -> app/build.gradle.kts)
+          moved_count = 0
+          for item in list(root.iterdir()):
+              if item.is_file() and "__" in item.name and not item.name.startswith("."):
+                  rel_target = Path(*item.name.split("__"))
+                  target_path = root / rel_target
+                  target_path.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(item, target_path)
+                  moved_count += 1
+                  print(f"Organized: {item.name} -> {rel_target}")
+
+          print(f"Total flat files organized into directory structure: {moved_count}")
+          assert (root / "settings.gradle.kts").exists(), "settings.gradle.kts missing!"
+          assert (root / "app/build.gradle.kts").exists(), "app/build.gradle.kts missing!"
+          PYEOF
+
+      - name: 3. Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 4. Set up Android SDK (API 35)
+        uses: android-actions/setup-android@v3
+
+      - name: 5. Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 6. Generate RSA-4096 Release Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > smart_receiver_pro_release.jks
+            cat <<EOF > keystore.properties
+          storeFile=smart_receiver_pro_release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          else
+            STORE_PASS="SmartReceiverPro2026!"
+            KEY_PASS="SmartReceiverPro2026!"
+            ALIAS="smart_receiver_pro_key"
+            keytool -genkeypair -v \
+              -keystore smart_receiver_pro_release.jks \
+              -alias "$ALIAS" \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 10000 \
+              -storepass "$STORE_PASS" \
+              -keypass "$KEY_PASS" \
+              -dname "CN=Smart Receiver Pro, OU=Mobile, O=SmartReceiverPro, L=Cairo, ST=Cairo, C=EG"
+            cat <<EOF > keystore.properties
+          storeFile=smart_receiver_pro_release.jks
+          storePassword=$STORE_PASS
+          keyAlias=$ALIAS
+          keyPassword=$KEY_PASS
+          EOF
+          fi
+
+      - name: 7. Run Unit Tests Across All 26 Modules
+        run: gradle testDebugUnitTest
+
+      - name: 8. Assemble Debug APK, Signed Release APK, and Release AAB
+        run: gradle :app:assembleDebug :app:assembleRelease :app:bundleRelease
+
+      - name: 9. Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartReceiverPro-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: 10. Upload Signed Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartReceiverPro-Release-APK
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: 11. Upload Signed Release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartReceiverPro-Release-AAB
+          path: app/build/outputs/bundle/release/app-release.aab
