@@ -70,14 +70,32 @@ if (greeting !is AppResult.Success || !greeting.data.startsWith("[[")) {
 }
 
         // Step 2: Query real device info via request="15"
-        val infoResponse = tcpClient.sendRequest("{\"request\":\"15\"}", expectResponse = true)
-        if (infoResponse !is AppResult.Success || infoResponse.data.isBlank()) {
-            tcpClient.disconnect()
-            return AppResult.Error(
-                ErrorCode.HANDSHAKE_REJECTED,
-                "لم يستجب الرسيفر لطلب التعريف القياسي (Request 15) على المنفذ $targetPort."
-            )
-        }
+        val infoResponse = tcpClient.sendRequest(
+    "{\"request\":\"15\"}",
+    expectResponse = true
+)
+
+if (infoResponse is AppResult.Error) {
+    StructuredLogger.warn(
+        "GmScreenAdapter",
+        "Request 15 failed",
+        mapOf(
+            "ip" to ipAddress,
+            "port" to targetPort,
+            "reason" to infoResponse.message
+        )
+    )
+    tcpClient.disconnect()
+    return infoResponse
+}
+
+if (infoResponse !is AppResult.Success || infoResponse.data.isBlank()) {
+    tcpClient.disconnect()
+    return AppResult.Error(
+        ErrorCode.INVALID_RESPONSE_PAYLOAD,
+        "استجاب الرسيفر دون إرسال بيانات تعريف صالحة لطلب Request 15."
+    )
+}
 
         val parsedInfo = parseDeviceInfoJson(ipAddress, targetPort, infoResponse.data)
             ?: run {
