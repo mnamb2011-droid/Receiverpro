@@ -50,7 +50,7 @@ class FullSystemIntegrationTest {
         assertNotNull(sessionManager.session.value.lastErrorArabic)
 
         // Commands during Wi-Fi loss must fail cleanly without queuing duplicate storms
-        valdisconnectedKeyRes = sessionManager.sendRateLimitedRemoteKey(RemoteKey.VOL_UP)
+        val disconnectedKeyRes = sessionManager.sendRateLimitedRemoteKey(RemoteKey.VOL_UP)
         assertTrue(disconnectedKeyRes is AppResult.Error)
     }
 
