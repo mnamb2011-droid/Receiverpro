@@ -112,63 +112,62 @@ fun LiveTvPlayerScreen(
                 }
 
                 // رسائل الحالة تظهر فوق الفيديو عند الحاجة
-                when {
-                    !playerState.errorArabic.isNullOrBlank() -> {
-    val errorMessage = playerState.errorArabic.orEmpty()
-    Column(...) {
-        Text(
-            text = errorMessage,
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .background(DarkSurface.copy(alpha = 0.85f))
-                                .padding(16.dp)
-                        ) {
-                            Text(
-                                playerState.errorArabic,
-                                color = CrimsonDanger,
-                                style = MaterialTheme.typography.titleMedium
-                            )
+              
+when {
+    !playerState.errorArabic.isNullOrBlank() -> {
+        val errorMessage = playerState.errorArabic.orEmpty()
 
-                            Spacer(modifier = Modifier.height(8.dp))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .background(DarkSurface.copy(alpha = 0.85f))
+                .padding(16.dp)
+        ) {
+            Text(
+                text = errorMessage,
+                color = CrimsonDanger,
+                style = MaterialTheme.typography.titleMedium
+            )
 
-                            Button(onClick = onRetryStream) {
-                                Text("إعادة المحاولة")
-                            }
-                        }
-                    }
+            Spacer(modifier = Modifier.height(8.dp))
 
-                    playerState.isBuffering -> {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .background(DarkSurface.copy(alpha = 0.75f))
-                                .padding(12.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                color = ElectricBlue
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text("جاري تحميل البث...")
-                        }
-                    }
-
-                    player == null -> {
-                        Text(
-                            "مشغل الفيديو غير متصل",
-                            color = CrimsonDanger
-                        )
-                    }
-
-                    playerState.currentStreamUrl == null -> {
-                        Text(
-                            "اختر قناة لبدء المشاهدة",
-                            color = TextPrimaryDark
-                        )
-                    }
-                }
+            Button(onClick = onRetryStream) {
+                Text("إعادة المحاولة")
             }
+        }
+    }
+
+    playerState.isBuffering -> {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .background(DarkSurface.copy(alpha = 0.75f))
+                .padding(12.dp)
+        ) {
+            CircularProgressIndicator(
+                color = ElectricBlue
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text("جاري تحميل البث...")
+        }
+    }
+
+    player == null -> {
+        Text(
+            "مشغل الفيديو غير متصل",
+            color = CrimsonDanger
+        )
+    }
+
+    playerState.currentStreamUrl == null -> {
+        Text(
+            "اختر قناة لبدء المشاهدة",
+            color = TextPrimaryDark
+        )
+    }
+}
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
