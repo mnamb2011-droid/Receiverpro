@@ -71,6 +71,11 @@ android {
     buildFeatures {
         compose = true
     }
+testOptions {
+    unitTests {
+        isReturnDefaultValues = true
+    }
+}
     bundle {
         language {
             enableSplit = false // Keep Arabic & English bundled for instant in-app switching
