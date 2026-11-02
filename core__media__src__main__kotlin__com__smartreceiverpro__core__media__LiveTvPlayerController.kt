@@ -1,12 +1,15 @@
+
 package com.smartreceiverpro.core.media
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import com.smartreceiverpro.core.common.StructuredLogger
-import com.smartreceiverpro.core.network.RtspSatIpKeepAliveClient
 import com.smartreceiverpro.engine.api.StreamDescriptor
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,87 +34,185 @@ data class LivePlayerUiState(
     val errorArabic: String? = null
 )
 
-/**
- * Manages live channel playback via AndroidX Media3 (ExoPlayer) + RTSP keep-alive,
- * and supports launching external players (such as VLC or MX Player) only when a
- * verified stream URL is provided by the receiver.
- * Never bypasses CAS/DRM encryption on scrambled channels.
- */
-class LiveTvPlayerController(
-    private val rtspKeepAlive: RtspSatIpKeepAliveClient = RtspSatIpKeepAliveClient()
-) {
-    private val _playerState = MutableStateFlow(LivePlayerUiState())
-    val playerState: StateFlow<LivePlayerUiState> = _playerState.asStateFlow()
+class LiveTvPlayerController(context: Context) {
 
-    fun prepareStream(scope: CoroutineScope, descriptor: StreamDescriptor, hostIp: String) {
-        if (descriptor.streamUrl.isBlank()) {
-            _playerState.value = _playerState.value.copy(
-                isPlaying = false,
-                isBuffering = false,
-                errorArabic = "الرسيفر لم يوفر رابط بث صالح لهذه القناة."
-            )
+    private val appContext = context.applicationContext
+
+    private var exoPlayer: ExoPlayer? = null
+
+    private val _playerState = MutableStateFlow(LivePlayerUiState())
+    val playerState: StateFlow<LivePlayerUiState> =
+        _playerState.asStateFlow()
+
+    fun initializePlayer(): ExoPlayer {
+        exoPlayer?.let { return it }
+
+        val player = ExoPlayer.Builder(appContext).build()
+
+        player.addListener(object : Player.Listener {
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val buffering =
+                    playbackState == Player.STATE_BUFFERING
+
+                val playing =
+                    playbackState == Player.STATE_READY &&
+                    player.isPlaying
+
+                _playerState.value =
+                    _playerState.value.copy(
+                        isBuffering = buffering,
+                        isPlaying = playing
+                    )
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                _playerState.value =
+                    _playerState.value.copy(
+                        isPlaying = isPlaying
+                    )
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                StructuredLogger.warn(
+                    "LiveTvPlayer",
+                    "Playback error",
+                    mapOf("error" to error.message)
+                )
+
+                _playerState.value =
+                    _playerState.value.copy(
+                        isPlaying = false,
+                        isBuffering = false,
+                        errorArabic =
+                            "تعذر تشغيل البث: ${error.message ?: "خطأ غير معروف"}"
+                    )
+            }
+        })
+
+        exoPlayer = player
+        return player
+    }
+
+    fun prepareStream(descriptor: StreamDescriptor) {
+
+        val url = descriptor.streamUrl
+
+        if (url.isBlank()) {
+            _playerState.value =
+                _playerState.value.copy(
+                    isPlaying = false,
+                    isBuffering = false,
+                    errorArabic = "رابط البث غير صالح."
+                )
             return
         }
-        if (descriptor.isScrambled) {
-            StructuredLogger.info("LiveTvPlayer", "Channel is marked scrambled by STB; playback depends on STB hardware CAM state")
+
+        if (!url.startsWith("rtsp://", true)) {
+            _playerState.value =
+                _playerState.value.copy(
+                    isPlaying = false,
+                    errorArabic = "نوع رابط البث غير مدعوم في مشغل RTSP."
+                )
+            return
         }
-        _playerState.value = _playerState.value.copy(
-            isPlaying = true,
-            isBuffering = false,
-            currentStreamUrl = descriptor.streamUrl,
-            isScrambledChannel = descriptor.isScrambled,
-            errorArabic = null
-        )
-        if (descriptor.requiresRtspKeepAlive) {
-            rtspKeepAlive.startKeepAlive(scope, host = hostIp, sessionId = descriptor.rtspSessionId)
-        } else {
-            rtspKeepAlive.stopKeepAlive()
+
+        try {
+            val player = initializePlayer()
+
+            _playerState.value =
+                _playerState.value.copy(
+                    isPlaying = false,
+                    isBuffering = true,
+                    currentStreamUrl = url,
+                    isScrambledChannel = descriptor.isScrambled,
+                    errorArabic = null
+                )
+
+            val mediaItem =
+                MediaItem.fromUri(Uri.parse(url))
+
+            val mediaSource =
+                RtspMediaSource.Factory()
+                    .setForceUseRtpTcp(false)
+                    .createMediaSource(mediaItem)
+
+            player.setMediaSource(mediaSource)
+            player.prepare()
+            player.playWhenReady = true
+
+        } catch (e: Exception) {
+
+            StructuredLogger.warn(
+                "LiveTvPlayer",
+                "Failed to prepare stream",
+                mapOf("error" to e.message)
+            )
+
+            _playerState.value =
+                _playerState.value.copy(
+                    isPlaying = false,
+                    isBuffering = false,
+                    errorArabic =
+                        "فشل تجهيز البث: ${e.message}"
+                )
         }
     }
 
-    fun setAspectRatio(mode: VideoAspectRatioMode) {
-        _playerState.value = _playerState.value.copy(aspectRatioMode = mode)
+    fun getPlayer(): ExoPlayer? = exoPlayer
+
+    fun pause() {
+        exoPlayer?.pause()
+    }
+
+    fun resume() {
+        exoPlayer?.play()
+    }
+
+    fun stop() {
+        exoPlayer?.stop()
+
+        _playerState.value =
+            _playerState.value.copy(
+                isPlaying = false,
+                isBuffering = false
+            )
     }
 
     fun setVolume(percent: Int) {
-        val clamped = percent.coerceIn(0, 100)
-        _playerState.value = _playerState.value.copy(volumePercent = clamped, isMuted = clamped == 0)
+        val value = percent.coerceIn(0, 100)
+
+        exoPlayer?.volume = value / 100f
+
+        _playerState.value =
+            _playerState.value.copy(
+                volumePercent = value,
+                isMuted = value == 0
+            )
     }
 
     fun toggleMute() {
-        val curr = _playerState.value
-        _playerState.value = curr.copy(isMuted = !curr.isMuted)
+        val muted = !_playerState.value.isMuted
+
+        exoPlayer?.volume =
+            if (muted) 0f
+            else _playerState.value.volumePercent / 100f
+
+        _playerState.value =
+            _playerState.value.copy(isMuted = muted)
     }
 
-    fun onNetworkErrorAndAutoReconnect(maxAttempts: Int = 3): Boolean {
-        val curr = _playerState.value
-        if (curr.reconnectAttempt >= maxAttempts) {
-            _playerState.value = curr.copy(
-                isPlaying = false,
-                isBuffering = false,
-                errorArabic = "تعذر استعادة البث بعد $maxAttempts محاولات. تحقق من حالة الرسيفر أو إشارة الطبق."
+    fun setAspectRatio(mode: VideoAspectRatioMode) {
+        _playerState.value =
+            _playerState.value.copy(
+                aspectRatioMode = mode
             )
-            return false
-        }
-        _playerState.value = curr.copy(
-            isBuffering = true,
-            reconnectAttempt = curr.reconnectAttempt + 1,
-            errorArabic = "جاري إعادة الاتصال بالبث (محاولة ${curr.reconnectAttempt + 1} من $maxAttempts)..."
-        )
-        return true
-    }
-
-    fun buildExternalPlayerIntent(context: Context): Intent? {
-        val url = _playerState.value.currentStreamUrl ?: return null
-        if (url.isBlank()) return null
-        return Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse(url), "video/*")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
     }
 
     fun release() {
-        rtspKeepAlive.stopKeepAlive()
+        exoPlayer?.release()
+        exoPlayer = null
+
         _playerState.value = LivePlayerUiState()
     }
 }
