@@ -57,18 +57,42 @@ class GmScreenFramedTcpClient(private val allowExternalLan: Boolean = false) {
                 ((header[5].toInt() and 0xff) shl 8)
         }
 
-        fun decodeResponseBytes(bytes: ByteArray): String {
-            if (bytes.isEmpty()) return ""
-            val decoded = if (bytes.size >= 2 &&
-                bytes[0] == 0x78.toByte() &&
-                (bytes[1] == 0x9C.toByte() || bytes[1] == 0x01.toByte() ||
-                    bytes[1] == 0xDA.toByte())
-            ) decompressZlib(bytes) else String(bytes, Charsets.UTF_8)
+        
+fun decodeResponseBytes(bytes: ByteArray): String {
+    if (bytes.isEmpty()) return ""
 
-            return if (decoded.startsWith("Start") && decoded.length >= 15 &&
-                decoded.substring(12, 15) == "End"
-            ) decoded.substring(15) else decoded
+    val isZlib = if (bytes.size >= 2) {
+        val cmf = bytes[0].toInt() and 0xff
+        val flg = bytes[1].toInt() and 0xff
+
+        (cmf and 0x0f) == 8 &&
+        (cmf shr 4) <= 7 &&
+        ((cmf shl 8) + flg) % 31 == 0
+    } else {
+        false
+    }
+
+    val decoded = if (isZlib) {
+        try {
+            decompressZlib(bytes)
+        } catch (_: Exception) {
+            String(bytes, Charsets.UTF_8)
         }
+    } else {
+        String(bytes, Charsets.UTF_8)
+    }
+
+    return if (
+        decoded.startsWith("Start") &&
+        decoded.length >= 15 &&
+        decoded.substring(12, 15) == "End"
+    ) {
+        decoded.substring(15)
+    } else {
+        decoded
+    }
+}
+
 
         private fun decompressZlib(bytes: ByteArray): String {
             InflaterInputStream(ByteArrayInputStream(bytes)).use { inflater ->
