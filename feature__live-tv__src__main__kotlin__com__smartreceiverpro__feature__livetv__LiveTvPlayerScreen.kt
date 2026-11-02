@@ -113,8 +113,11 @@ fun LiveTvPlayerScreen(
 
                 // رسائل الحالة تظهر فوق الفيديو عند الحاجة
                 when {
-                    playerState.errorArabic != null -> {
-                        Column(
+                    !playerState.errorArabic.isNullOrBlank() -> {
+    val errorMessage = playerState.errorArabic.orEmpty()
+    Column(...) {
+        Text(
+            text = errorMessage,
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .background(DarkSurface.copy(alpha = 0.85f))
