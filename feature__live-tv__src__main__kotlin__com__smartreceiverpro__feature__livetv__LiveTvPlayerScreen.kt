@@ -168,6 +168,7 @@ when {
         )
     }
 }
+            }              
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
