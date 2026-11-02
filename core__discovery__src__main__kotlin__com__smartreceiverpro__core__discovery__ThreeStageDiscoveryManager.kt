@@ -181,7 +181,21 @@ class ThreeStageDiscoveryManager(
         val chosenAdapter = selectAdapterForReport(report, availableAdapters)
             ?: return AppResult.Error(ErrorCode.UNSUPPORTED_OPERATION, "لا يتوفر محول (Adapter) متوافق مع البروتوكول المكتشف.")
 
-        val connectResult = chosenAdapter.connect(ipAddress, port, password)
+        val adapterPort = when (chosenAdapter.pluginFamilyId) {
+    "senator", "gmscreen" ->
+        GmScreenFramedTcpClient.DEFAULT_GMSCREEN_PORT
+
+    "generic-upnp" ->
+        if (port <= 0) 49152 else port
+
+    else -> port
+}
+
+val connectResult = chosenAdapter.connect(
+    ipAddress,
+    adapterPort,
+    password
+)
         if (connectResult !is AppResult.Success) {
             val errMsg = (connectResult as? AppResult.Error)?.message ?: "فشل الاتصال بالبروتوكول"
             _verificationState.value = _verificationState.value.copy(
