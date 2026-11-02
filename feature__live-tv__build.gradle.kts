@@ -47,6 +47,11 @@ dependencies {
 
     implementation(project(":core:media"))
 
+// Media3 dependencies required by LiveTvPlayerScreen
+implementation(libs.androidx.media3.exoplayer)
+implementation(libs.androidx.media3.ui)
+implementation(libs.androidx.media3.common)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }
