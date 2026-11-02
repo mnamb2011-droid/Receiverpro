@@ -93,7 +93,6 @@ fun decodeResponseBytes(bytes: ByteArray): String {
     }
 }
 
-
         private fun decompressZlib(bytes: ByteArray): String {
             InflaterInputStream(ByteArrayInputStream(bytes)).use { inflater ->
                 ByteArrayOutputStream().use { out ->
