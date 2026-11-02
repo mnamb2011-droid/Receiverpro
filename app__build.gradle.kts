@@ -90,6 +90,8 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:design"))
     implementation(project(":core:media"))
+// ExoPlayer is exposed in app-level screen APIs.
+implementation(libs.androidx.media3.exoplayer)
     implementation(project(":core:discovery"))
 
     implementation(project(":receiver-engine:api"))
