@@ -27,13 +27,15 @@ android {
 }
 
 dependencies {
-
     implementation(project(":core:common"))
     implementation(project(":core:design"))
     implementation(project(":core:database"))
     implementation(project(":receiver-engine:api"))
     implementation(project(":receiver-engine:capabilities"))
     implementation(project(":receiver-engine:connection"))
+
+    implementation(libs.kotlinx.serialization.json)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
