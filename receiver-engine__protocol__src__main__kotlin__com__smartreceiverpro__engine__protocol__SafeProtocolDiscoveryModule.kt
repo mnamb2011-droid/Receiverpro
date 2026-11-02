@@ -74,8 +74,7 @@ class SafeProtocolDiscoveryModule {
         val outcomes = mutableListOf<PortProbeOutcome>()
         val proven = mutableListOf<String>()
         val unverified = mutableListOf<String>()
-
-        for ((port, label) in DOCUMENTED_STB_PORTS) {
+        
         
 for ((port, label) in DOCUMENTED_STB_PORTS) {
     val isOpen = checkTcpPortOpen(ipAddress, port, timeoutMs)
