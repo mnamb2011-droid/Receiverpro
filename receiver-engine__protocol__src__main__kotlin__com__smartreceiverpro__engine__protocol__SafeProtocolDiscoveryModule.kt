@@ -78,17 +78,53 @@ class SafeProtocolDiscoveryModule {
         for ((port, label) in DOCUMENTED_STB_PORTS) {
             val isOpen = checkTcpPortOpen(ipAddress, port, timeoutMs)
             var banner = ""
-            if (isOpen && port == 20000) {
-                // Safe read-only Request 15 (Get Device Info & Status)
-                val tcpClient = GmScreenFramedTcpClient()
-                val conn = tcpClient.connect(ipAddress, 20000, timeoutMs)
-                if (conn is AppResult.Success) {
-                    val infoResp = tcpClient.sendRequest("{\"request\":\"15\"}", expectResponse = true)
-                    if (infoResp is AppResult.Success && infoResp.data.isNotBlank()) {
-                        banner = infoResp.data.take(180)
-                        proven.add("G-MScreen TCP Port 20000 (Request 15 Info Verified)")
-                    }
-                    tcpClient.disconnect()
+            
+if (isOpen && port == 20000) {
+    val tcpClient = GmScreenFramedTcpClient()
+    try {
+        val conn = tcpClient.connect(ipAddress, 20000, timeoutMs)
+
+        if (conn is AppResult.Success) {
+            // Step 1: G-MScreen handshake
+            val handshake =
+                "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><Command request=\"998\" />"
+
+            val greeting = tcpClient.sendRequest(
+                handshake,
+                expectResponse = true
+            )
+
+            if (greeting is AppResult.Success &&
+                greeting.data.startsWith("[[")) {
+
+                // Step 2: Read-only device information request
+                val infoResp = tcpClient.sendRequest(
+                    "{\"request\":\"15\"}",
+                    expectResponse = true
+                )
+
+                if (infoResp is AppResult.Success &&
+                    infoResp.data.isNotBlank()) {
+                    banner = infoResp.data.take(180)
+                    proven.add(
+                        "G-MScreen TCP Port 20000 (Request 15 Info Verified)"
+                    )
+                } else {
+                    unverified.add(
+                        "G-MScreen handshake succeeded but Request 15 failed"
+                    )
+                }
+            } else {
+                unverified.add(
+                    "Port 20000 open but G-MScreen handshake failed"
+                )
+            }
+        }
+    } finally {
+        tcpClient.disconnect()
+    }
+}
+
                 }
             } else if (isOpen && port == 554) {
                 banner = probeRtspOptionsReadOnly(ipAddress, 554, timeoutMs)
