@@ -76,69 +76,68 @@ class SafeProtocolDiscoveryModule {
         val unverified = mutableListOf<String>()
 
         for ((port, label) in DOCUMENTED_STB_PORTS) {
-            val isOpen = checkTcpPortOpen(ipAddress, port, timeoutMs)
-            var banner = ""
-            
-if (isOpen && port == 20000) {
-    val tcpClient = GmScreenFramedTcpClient()
-    try {
-        val conn = tcpClient.connect(ipAddress, 20000, timeoutMs)
+        
+for ((port, label) in DOCUMENTED_STB_PORTS) {
+    val isOpen = checkTcpPortOpen(ipAddress, port, timeoutMs)
+    var banner = ""
 
-        if (conn is AppResult.Success) {
-            // Step 1: G-MScreen handshake
-            val handshake =
-                "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><Command request=\"998\" />"
+    if (isOpen && port == 20000) {
+        val tcpClient = GmScreenFramedTcpClient()
+        try {
+            val conn = tcpClient.connect(ipAddress, 20000, timeoutMs)
 
-            val greeting = tcpClient.sendRequest(
-                handshake,
-                expectResponse = true
-            )
+            if (conn is AppResult.Success) {
+                val handshake =
+                    "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><Command request=\"998\" />"
 
-            if (greeting is AppResult.Success &&
-                greeting.data.startsWith("[[")) {
-
-                // Step 2: Read-only device information request
-                val infoResp = tcpClient.sendRequest(
-                    "{\"request\":\"15\"}",
+                val greeting = tcpClient.sendRequest(
+                    handshake,
                     expectResponse = true
                 )
 
-                if (infoResp is AppResult.Success &&
-                    infoResp.data.isNotBlank()) {
-                    banner = infoResp.data.take(180)
-                    proven.add(
-                        "G-MScreen TCP Port 20000 (Request 15 Info Verified)"
+                if (greeting is AppResult.Success &&
+                    greeting.data.startsWith("[[")) {
+
+                    val infoResp = tcpClient.sendRequest(
+                        "{\"request\":\"15\"}",
+                        expectResponse = true
                     )
+
+                    if (infoResp is AppResult.Success &&
+                        infoResp.data.isNotBlank()) {
+                        banner = infoResp.data.take(180)
+                        proven.add(
+                            "G-MScreen TCP Port 20000 (Request 15 Info Verified)"
+                        )
+                    } else {
+                        unverified.add(
+                            "G-MScreen handshake succeeded but Request 15 failed"
+                        )
+                    }
                 } else {
                     unverified.add(
-                        "G-MScreen handshake succeeded but Request 15 failed"
+                        "Port 20000 open but G-MScreen handshake failed"
                     )
                 }
-            } else {
-                unverified.add(
-                    "Port 20000 open but G-MScreen handshake failed"
-                )
             }
+        } finally {
+            tcpClient.disconnect()
         }
-    } finally {
-        tcpClient.disconnect()
+    } else if (isOpen && port == 554) {
+        banner = probeRtspOptionsReadOnly(ipAddress, 554, timeoutMs)
+        if (banner.contains("RTSP/1.0", ignoreCase = true)) {
+            proven.add(
+                "RTSP / SAT>IP Port 554 (${banner.lineSequence().firstOrNull().orEmpty()})"
+            )
+        }
+    } else if (isOpen) {
+        proven.add("$label (Port $port Open)")
+    } else {
+        unverified.add("$label (Port $port Closed)")
     }
+
+    outcomes.add(PortProbeOutcome(port, label, isOpen, banner))
 }
-
-                }
-            } else if (isOpen && port == 554) {
-                banner = probeRtspOptionsReadOnly(ipAddress, 554, timeoutMs)
-                if (banner.contains("RTSP/1.0", ignoreCase = true)) {
-                    proven.add("RTSP / SAT>IP Port 554 (${banner.lineSequence().firstOrNull().orEmpty()})")
-                }
-            } else if (isOpen) {
-                proven.add("$label (Port $port Open)")
-            } else {
-                unverified.add("$label (Port $port Closed)")
-            }
-
-            outcomes.add(PortProbeOutcome(port, label, isOpen, banner))
-        }
 
         val anyReachable = outcomes.any { it.isOpen } || try {
             InetAddress.getByName(ipAddress).isReachable(timeoutMs)
