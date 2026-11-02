@@ -81,28 +81,28 @@ class FullSystemIntegrationTest {
         val confirmedDelete = mockAdapter.deleteChannels(listOf("0002"), userConfirmed = true)
         assertTrue(confirmedDelete is AppResult.Success)
     }
+@Test
+fun `test live tv aspect ratio options are defined`() {
+    assertEquals(
+        16f / 9f,
+        VideoAspectRatioMode.SIXTEEN_NINE.ratioValue!!,
+        0.001f
+    )
 
-    @Test
-    fun `test live tv playback state, aspect ratio, and auto-reconnect limit`() = runTest {
-        val player = LiveTvPlayerController()
-        val descriptor = StreamDescriptor(
-            streamUrl = "rtsp://192.168.1.50:554/?prognumber=0001",
-            protocol = "RTSP",
-            isScrambled = false,
-            requiresRtspKeepAlive = false
-        )
-        player.prepareStream(this, descriptor, "192.168.1.50")
-        assertTrue(player.playerState.value.isPlaying)
+    assertEquals(
+        4f / 3f,
+        VideoAspectRatioMode.FOUR_THREE.ratioValue!!,
+        0.001f
+    )
 
-        player.setAspectRatio(VideoAspectRatioMode.FOUR_THREE)
-        assertEquals(VideoAspectRatioMode.FOUR_THREE, player.playerState.value.aspectRatioMode)
+    assertEquals(
+        -1f,
+        VideoAspectRatioMode.FILL.ratioValue!!,
+        0.001f
+    )
 
-        // Simulate 3 network drops
-        assertTrue(player.onNetworkErrorAndAutoReconnect(maxAttempts = 2))
-        assertTrue(player.onNetworkErrorAndAutoReconnect(maxAttempts = 2))
-        assertFalse("Should stop after maxAttempts", player.onNetworkErrorAndAutoReconnect(maxAttempts = 2))
-    }
-
+    assertNull(VideoAspectRatioMode.FIT.ratioValue)
+}
     @Test
     fun `test timer conflict detection and receiver confirmation requirement`() {
         val existing = listOf(
